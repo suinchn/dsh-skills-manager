@@ -1,0 +1,124 @@
+import type { CreateInput, ScopeOptions } from './types.js';
+import type { ProviderCandidate, createSkill, getProviderSkill } from './core.js';
+/** 七版宿主实际使用的最小服务契约，兼容旧版可选服务与返回值。 */
+export interface ProviderControl {
+    invalidate: () => void;
+    signal?: AbortSignal;
+}
+interface SkillProvider {
+    name: string;
+    list: (options?: ScopeOptions) => Promise<ProviderCandidate[]>;
+    get: (candidate: ProviderCandidate, options?: ScopeOptions) => ReturnType<typeof getProviderSkill>;
+}
+interface Skills {
+    invalidate?: () => void;
+    registerProvider: (factory: (control: ProviderControl) => SkillProvider) => (() => void);
+}
+interface Session {
+    id?: string;
+    header?: {
+        id?: string;
+        cwd?: string;
+        agentPreset?: string;
+    };
+}
+/** 宿主登记的工作区；只读 list，字段名在各版本里可能是 path 或 cwd。 */
+interface WorkspaceRegistry {
+    list?: () => Iterable<{ id?: unknown; path?: unknown; cwd?: unknown; title?: unknown }>;
+}
+interface Sessions {
+    list: () => Session[];
+    get?: (id: string) => Session | undefined;
+}
+export interface Agent {
+    id: string;
+    ctx: {
+        skills?: Skills;
+        get?: (key: 'skills') => Skills | undefined;
+    };
+}
+interface Services {
+    workspaceRegistry: WorkspaceRegistry;
+    sessions: Sessions;
+    agents: {
+        list: () => Agent[];
+    };
+    desktopProfiles: {
+        current?: {
+            name: string;
+            dir: string;
+        };
+    };
+    desktopPnpm: {
+        runPlugin: (args: string[], directory: string) => {
+            done: Promise<{
+                exitCode: number;
+            }>;
+        };
+    };
+    sandboxPolicy?: {
+        resolve?: (request?: { session?: unknown; mode?: string }) => { mode?: string; workspaceRoot?: string };
+    };
+    sessionProjections?: {
+        stateOf?: (session: unknown, key: string) => unknown;
+    };
+}
+export interface HostContext {
+    get?: <K extends keyof Services>(key: K) => Services[K] | undefined;
+    sessions?: Sessions;
+    skills: Skills;
+    connection?: {
+        fetch: {
+            register: (route: {
+                path: string;
+                methods: string[];
+                requestBody?: "buffered" | "streaming";
+                fetch: (request: Request) => Promise<Response>;
+            }) => () => void;
+        };
+        requestRejection?: (request: unknown) => number | undefined;
+    };
+    logger: {
+        warn: (message: string) => void;
+    };
+    effect: (effect: () => (() => void) | void, label: string) => unknown;
+    emit?: (event: string, ...args: unknown[]) => unknown;
+    on?: {
+        (event: 'agent/created' | 'agent/disposed', handler: (event: {
+            agent: Agent;
+        }) => void): (() => void) | void;
+        (event: 'agent-preset/selected', handler: (...args: unknown[]) => void): (() => void) | void;
+        (event: 'tools/pre-execute', handler: (execution: {
+            name: string;
+            agent?: unknown;
+            [key: string]: unknown;
+        }, next: () => unknown) => unknown): (() => void) | void;
+    };
+    sandboxPolicy?: {
+        resolve?: (request?: { session?: unknown; mode?: string }) => { mode?: string; workspaceRoot?: string };
+    };
+    sessionProjections?: {
+        stateOf?: (session: unknown, key: string) => unknown;
+    };
+    tools?: {
+        register: (tool: {
+            name: string;
+            description: string;
+            parameters: unknown;
+            output: {
+                schema: unknown;
+                render: (args: CreateInput, value: Awaited<ReturnType<typeof createSkill>>) => {
+                    type: string;
+                    text: string;
+                }[];
+            };
+            execute: (args: CreateInput) => ReturnType<typeof createSkill>;
+            presentCall: (args: CreateInput) => {
+                card: string;
+                title: string;
+                kind: string;
+                rawInput?: string;
+            };
+        }) => () => void;
+    };
+}
